@@ -1,0 +1,12 @@
+# ข้อมูลและโมเดลของเครื่องนี้ (อาจเป็นภาพของหน่วยงาน ห้ามขึ้น GitHub)
+workspace/
+*.pt
+*.onnx
+runs/
+# Python
+.venv/
+__pycache__/
+*.pyc
+# OS
+.DS_Store
+Thumbs.db

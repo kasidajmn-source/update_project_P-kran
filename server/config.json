@@ -1,0 +1,7 @@
+{
+  "host": "127.0.0.1",
+  "port": 8765,
+  "allowed_origins": [
+    "https://kasidaj-source.github.io"
+  ]
+}

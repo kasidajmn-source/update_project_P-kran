@@ -1,0 +1,8 @@
+# ติดตั้ง PyTorch ก่อน (ดู README) แล้วค่อย: pip install -r server/requirements.txt
+ultralytics>=8.4.0
+fastapi>=0.110
+uvicorn>=0.29
+python-multipart>=0.0.9
+pyyaml>=6.0
+opencv-python>=4.8
+numpy>=1.24

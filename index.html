@@ -1,0 +1,682 @@
+<!DOCTYPE html>
+<html lang="th">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>ระบบหาปริมาณความเสียหายโครงสร้างจากภาพถ่าย</title>
+<meta name="description" content="วัดรอยร้าว พื้นที่ผิวเสียหาย และเหล็กเสริมจากภาพถ่าย พร้อมตรวจจับและเทรนโมเดล YOLO">
+<meta name="theme-color" content="#FFC20E">
+<link rel="icon" href="favicon.svg" type="image/svg+xml">
+<link rel="stylesheet" href="vendor/fonts/fonts.css">
+<script src="vendor/exceljs.min.js"></script>
+<script src="vendor/FileSaver.min.js"></script>
+<script src="vendor/lucide.min.js"></script>
+<script src="vendor/jszip.min.js"></script>
+<style>
+:root{
+  --paper:#FFFFFF; --ground:#F5F5F2; --ink:#1E2228; --ink-2:#5B616B; --ink-3:#8A9099;
+  --line:#E3E2DC; --line-2:#D2D0C8;
+  --yellow:#FFC20E; --yellow-deep:#E0A800; --yellow-soft:#FFF5D1; --yellow-ink:#6B4E00;
+  --crack:#D9363E; --area:#E8730C; --rebar:#2F8F5B; --ref:#2563EB;
+  --ok:#2F8F5B; --err:#C62828;
+  --r-lg:12px; --r:8px; --r-sm:6px;
+  --font:'IBM Plex Sans Thai','Leelawadee UI','Tahoma',system-ui,sans-serif;
+}
+*{box-sizing:border-box}
+html,body{margin:0}
+body{font-family:var(--font);background:var(--ground);color:var(--ink);font-size:14px;line-height:1.55;-webkit-font-smoothing:antialiased}
+button,input,select,textarea{font:inherit;color:inherit}
+.num{font-variant-numeric:tabular-nums}
+.hidden{display:none!important}
+i[data-lucide],svg.lucide{width:16px;height:16px;stroke-width:2;flex-shrink:0}
+:focus-visible{outline:2px solid var(--ink);outline-offset:2px}
+@media (prefers-reduced-motion:reduce){*{animation:none!important;transition:none!important}}
+
+/* ---------- header */
+.rule{height:5px;background:var(--yellow)}
+.top{background:var(--paper);border-bottom:1px solid var(--line)}
+.top-in{max-width:1600px;margin:0 auto;padding:14px 24px;display:flex;gap:20px;align-items:center;flex-wrap:wrap}
+.brand{display:flex;gap:14px;align-items:center;min-width:280px;flex:1 1 360px}
+.logo-slot{width:52px;height:52px;border-radius:var(--r);display:grid;place-items:center;border:1px dashed var(--line-2);background:var(--paper);cursor:pointer;overflow:hidden;flex-shrink:0;padding:0}
+.logo-slot.has-logo{border:none}
+.logo-slot img{max-width:100%;max-height:100%;object-fit:contain}
+.logo-mark{width:100%;height:100%;display:grid;place-items:center;background:var(--yellow);color:var(--ink)}
+.logo-mark svg{width:24px;height:24px}
+.brand h1{font-size:19px;line-height:1.3;margin:0;font-weight:700;letter-spacing:-.01em}
+.brand p{margin:2px 0 0;color:var(--ink-2);font-size:12.5px}
+.meta{display:grid;grid-template-columns:repeat(3,minmax(130px,1fr));gap:10px;flex:2 1 480px}
+@media (max-width:640px){.meta{grid-template-columns:1fr}}
+.status-chip{display:inline-flex;align-items:center;gap:8px;padding:7px 12px;border:1px solid var(--line);border-radius:999px;font-size:12.5px;font-weight:500;background:var(--paper);cursor:pointer;white-space:nowrap}
+.dot{width:8px;height:8px;border-radius:50%;background:var(--ink-3)}
+.dot.ok{background:var(--ok)} .dot.busy{background:var(--yellow-deep);animation:pulse 1.4s infinite} .dot.err{background:var(--err)}
+@keyframes pulse{50%{opacity:.35}}
+
+/* ---------- form */
+.field label{display:block;font-size:12px;font-weight:600;color:var(--ink-2);margin-bottom:4px}
+.input,select.input{width:100%;height:36px;padding:0 10px;border:1px solid var(--line-2);border-radius:var(--r-sm);background:var(--paper);outline:none;transition:border-color .15s,box-shadow .15s}
+.input:focus{border-color:var(--ink);box-shadow:0 0 0 3px var(--yellow-soft)}
+.input.sm{height:30px;font-size:13px;padding:0 8px}
+input[type=color].input{padding:2px;width:44px}
+input[type=range]{accent-color:var(--yellow-deep);width:100%}
+input[type=checkbox]{accent-color:var(--ink);width:16px;height:16px}
+.hint{font-size:12px;color:var(--ink-3);margin-top:3px;line-height:1.45}
+
+.btn{display:inline-flex;align-items:center;justify-content:center;gap:7px;height:36px;padding:0 14px;border-radius:var(--r-sm);border:1px solid var(--line-2);background:var(--paper);font-weight:600;font-size:13.5px;cursor:pointer;transition:background .15s,border-color .15s;white-space:nowrap}
+.btn:hover{background:var(--ground)}
+.btn:disabled{opacity:.45;cursor:not-allowed}
+.btn-primary{background:var(--yellow);border-color:var(--yellow);color:var(--ink)}
+.btn-primary:hover{background:var(--yellow-deep);border-color:var(--yellow-deep)}
+.btn-dark{background:var(--ink);border-color:var(--ink);color:#fff}
+.btn-dark:hover{background:#000}
+.btn-ghost{border-color:transparent;background:transparent}
+.btn-danger{color:var(--err)}
+.btn-sm{height:30px;padding:0 10px;font-size:12.5px}
+.btn-block{width:100%}
+.icon-btn{width:30px;height:30px;padding:0;border:none;background:transparent;border-radius:var(--r-sm);display:inline-grid;place-items:center;cursor:pointer;color:var(--ink-2)}
+.icon-btn:hover{background:var(--ground);color:var(--ink)}
+.icon-btn:disabled{opacity:.3;cursor:not-allowed}
+
+/* ---------- layout */
+.wrap{max-width:1600px;margin:0 auto;padding:20px 24px 40px}
+.work{display:grid;grid-template-columns:340px minmax(0,1fr);gap:20px;align-items:start}
+@media (max-width:1100px){.work{grid-template-columns:1fr}}
+.rail{display:flex;flex-direction:column;gap:12px}
+.step{background:var(--paper);border:1px solid var(--line);border-radius:var(--r-lg);padding:16px;position:relative}
+.step.current::before{content:"";position:absolute;left:-1px;top:14px;bottom:14px;width:4px;border-radius:0 3px 3px 0;background:var(--yellow)}
+.step-h{display:flex;align-items:center;gap:10px;margin-bottom:12px}
+.step-n{width:24px;height:24px;border-radius:50%;display:grid;place-items:center;font-size:12px;font-weight:700;background:var(--ground);color:var(--ink-2);border:1px solid var(--line)}
+.step.current .step-n{background:var(--yellow);border-color:var(--yellow);color:var(--ink)}
+.step.done .step-n{background:var(--ink);border-color:var(--ink);color:#fff}
+.step-h h2{font-size:14.5px;margin:0;font-weight:700}
+.step-h .aside{margin-left:auto;font-size:12px;color:var(--ink-3);max-width:150px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.stack{display:flex;flex-direction:column;gap:10px}
+.row{display:flex;gap:8px;align-items:center}
+.grid2{display:grid;grid-template-columns:1fr 1fr;gap:8px}
+
+.seg{display:flex;padding:3px;background:var(--ground);border:1px solid var(--line);border-radius:var(--r);gap:3px}
+.seg button{flex:1;height:30px;border:none;background:transparent;border-radius:var(--r-sm);font-size:12.5px;font-weight:600;color:var(--ink-2);cursor:pointer}
+.seg button.on{background:var(--paper);color:var(--ink);box-shadow:0 0 0 1px var(--line-2)}
+
+.file-pick{display:flex;align-items:center;gap:10px;padding:10px 12px;border:1px dashed var(--line-2);border-radius:var(--r);cursor:pointer;background:var(--paper);font-size:13px;color:var(--ink-2)}
+.file-pick:hover{border-color:var(--ink);color:var(--ink)}
+.file-pick span{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+
+.cal-status{display:flex;align-items:center;gap:8px;padding:8px 10px;border-radius:var(--r-sm);font-size:12.5px;font-weight:600;background:var(--ground);color:var(--ink-2)}
+.cal-status.ok{background:#EAF5EE;color:var(--ok)}
+
+.tools{display:flex;flex-direction:column;gap:6px}
+.tool{display:flex;align-items:center;gap:10px;height:42px;padding:0 12px;border:1px solid var(--line);border-radius:var(--r);background:var(--paper);cursor:pointer;font-weight:600;font-size:13.5px;text-align:left;position:relative}
+.tool:hover{border-color:var(--line-2);background:#FCFCFA}
+.tool .sw{width:12px;height:12px;border-radius:3px}
+.tool .k{margin-left:auto;font-size:11.5px;color:var(--ink-3);font-weight:500}
+.tool.on{border-color:var(--ink);box-shadow:inset 4px 0 0 var(--yellow)}
+
+.ai-state{display:flex;gap:10px;align-items:flex-start;padding:10px 12px;border-radius:var(--r);background:var(--ground);font-size:12.5px;line-height:1.45}
+.ai-state b{display:block;font-size:13px}
+.ai-state code{font-size:12px;background:var(--paper);padding:0 4px;border-radius:3px}
+.range-row{display:flex;align-items:center;gap:10px}
+.range-row output{min-width:38px;text-align:right;font-weight:600;font-size:13px}
+details.more summary{cursor:pointer;font-size:12.5px;color:var(--ink-2);font-weight:600;list-style:none;display:flex;align-items:center;gap:6px}
+details.more summary::-webkit-details-marker{display:none}
+details.more[open] summary .chev,details.more[open] summary svg:first-child{transform:rotate(90deg)}
+details.more summary svg{transition:transform .15s}
+
+/* ---------- stage */
+.stage{min-width:0}
+.stage-bar{display:flex;align-items:center;gap:10px;flex-wrap:wrap;margin-bottom:10px;min-height:36px}
+.mode{display:inline-flex;align-items:center;gap:7px;padding:5px 12px;border-radius:999px;background:var(--paper);border:1px solid var(--line);font-size:12.5px;font-weight:600}
+.mode .sw{width:9px;height:9px;border-radius:50%;background:var(--ink-3)}
+.draw-ctl{margin-left:auto;display:flex;gap:6px;align-items:center;flex-wrap:wrap}
+.draw-ctl .kbd{font-size:11.5px;color:var(--ink-3);margin-right:6px}
+.canvas-box{position:relative;height:68vh;min-height:380px;border:1px solid var(--line);border-radius:var(--r-lg);overflow:hidden;display:flex;align-items:center;justify-content:center;
+  background-color:#FBFBF9;
+  background-image:linear-gradient(var(--line) 1px,transparent 1px),linear-gradient(90deg,var(--line) 1px,transparent 1px),linear-gradient(#EFEEE9 1px,transparent 1px),linear-gradient(90deg,#EFEEE9 1px,transparent 1px);
+  background-size:100px 100px,100px 100px,20px 20px,20px 20px}
+.canvas-box canvas{max-width:100%;max-height:100%;touch-action:none}
+.c-cross{cursor:crosshair}.c-grab{cursor:grab}.c-grabbing{cursor:grabbing}.c-default{cursor:default}
+.empty{display:flex;flex-direction:column;align-items:center;gap:10px;color:var(--ink-2);text-align:center;padding:20px}
+.empty svg{width:36px;height:36px;color:var(--ink-3)}
+.empty b{font-size:15px;color:var(--ink)}
+.busy-over{position:absolute;inset:0;background:rgba(255,255,255,.72);display:flex;align-items:center;justify-content:center;gap:10px;font-weight:600}
+.spin{width:18px;height:18px;border:2.5px solid var(--line-2);border-top-color:var(--ink);border-radius:50%;animation:spin .8s linear infinite;flex-shrink:0}
+@keyframes spin{to{transform:rotate(360deg)}}
+.notes{display:flex;gap:10px;flex-wrap:wrap;margin-top:10px}
+.note{display:flex;gap:8px;align-items:flex-start;font-size:12.5px;color:var(--ink-2);background:var(--paper);border:1px solid var(--line);border-radius:var(--r);padding:8px 12px;flex:1 1 320px}
+.note.warn{background:var(--yellow-soft);border-color:#F3DE97;color:var(--yellow-ink)}
+.note svg{margin-top:2px}
+
+/* ---------- results */
+.results{margin-top:24px;background:var(--paper);border:1px solid var(--line);border-radius:var(--r-lg);padding:20px}
+.results-h{display:flex;align-items:center;gap:12px;flex-wrap:wrap;margin-bottom:18px}
+.results-h h2{font-size:18px;margin:0;font-weight:700}
+.results-h .act{margin-left:auto;display:flex;gap:8px;flex-wrap:wrap}
+.res-grid{display:grid;grid-template-columns:340px minmax(0,1fr);gap:24px}
+@media (max-width:1100px){.res-grid{grid-template-columns:1fr}}
+.totals{display:grid;grid-template-columns:1fr;gap:10px}
+.total{border:1px solid var(--line);border-radius:var(--r);padding:12px 14px;display:flex;align-items:baseline;gap:10px}
+.total .lab{display:flex;align-items:center;gap:8px;font-size:13px;font-weight:600;color:var(--ink-2);flex:1}
+.total .lab .sw{width:10px;height:10px;border-radius:3px}
+.total .val{font-size:24px;font-weight:700;letter-spacing:-.01em}
+.total .unit{font-size:12px;color:var(--ink-3);min-width:46px}
+.card{border:1px solid var(--line);border-radius:var(--r);overflow:hidden}
+.card-h{display:flex;align-items:center;gap:8px;padding:10px 14px;border-bottom:1px solid var(--line);font-weight:700;font-size:13.5px;background:#FCFCFA}
+.card-h .sw{width:10px;height:10px;border-radius:3px}
+.card-h .count{margin-left:auto;color:var(--ink-3);font-weight:500;font-size:12.5px}
+.tbl-wrap{overflow-x:auto}
+table.tbl{width:100%;border-collapse:collapse;font-size:13px}
+.tbl th{text-align:left;font-weight:600;color:var(--ink-2);font-size:12px;padding:8px 14px;border-bottom:1px solid var(--line);white-space:nowrap}
+.tbl td{padding:7px 14px;border-bottom:1px solid #F0EFEA;vertical-align:middle}
+.tbl tr:last-child td{border-bottom:none}
+.tbl .r{text-align:right}.tbl .c{text-align:center;white-space:nowrap}
+.tbl .empty-row td{text-align:center;color:var(--ink-3);padding:18px}
+.tables{display:flex;flex-direction:column;gap:14px;max-height:640px;overflow-y:auto;padding-right:4px}
+.tag{display:inline-flex;align-items:center;gap:4px;font-size:11.5px;font-weight:600;padding:1px 7px;border-radius:999px;background:var(--ground);color:var(--ink-2);white-space:nowrap}
+.tag.ai{background:var(--yellow-soft);color:var(--yellow-ink)}
+.desc-cell{max-width:260px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.est{color:var(--ink-2)}
+
+footer{margin-top:36px;padding-top:16px;border-top:1px solid var(--line);display:flex;justify-content:center;color:var(--ink-2);font-size:13px;gap:8px;align-items:center;text-align:center}
+
+/* ---------- dialogs */
+.dlg-bg{position:fixed;inset:0;background:rgba(30,34,40,.45);display:none;align-items:center;justify-content:center;z-index:500;padding:16px}
+.dlg-bg.open{display:flex}
+.dlg{background:var(--paper);border-radius:var(--r-lg);width:100%;max-width:440px;max-height:calc(100vh - 32px);display:flex;flex-direction:column;box-shadow:0 20px 60px rgba(0,0,0,.18);animation:pop .16s ease-out}
+@keyframes pop{from{transform:translateY(6px);opacity:0}}
+.dlg-h{display:flex;align-items:center;gap:10px;padding:16px 20px;border-bottom:1px solid var(--line)}
+.dlg-h h3{margin:0;font-size:16px;font-weight:700}
+.dlg-h .icon-btn{margin-left:auto}
+.dlg-b{padding:18px 20px;overflow-y:auto}
+.dlg-f{display:flex;justify-content:flex-end;gap:8px;padding:14px 20px;border-top:1px solid var(--line);flex-wrap:wrap}
+.dlg.wide{max-width:1040px;height:min(860px,calc(100vh - 32px))}
+#dlg-confirm{z-index:600}
+
+.tabs{display:flex;gap:2px;padding:0 20px;border-bottom:1px solid var(--line);overflow-x:auto;flex-shrink:0}
+.tabs button{border:none;background:none;padding:12px 14px;font-weight:600;font-size:13.5px;color:var(--ink-2);cursor:pointer;border-bottom:3px solid transparent;margin-bottom:-1px;display:flex;gap:8px;align-items:center;white-space:nowrap}
+.tabs button .n{width:20px;height:20px;border-radius:50%;display:grid;place-items:center;background:var(--ground);font-size:11px}
+.tabs button.on{color:var(--ink);border-bottom-color:var(--yellow)}
+.tabs button.on .n{background:var(--yellow)}
+.tab-pane{display:none}.tab-pane.on{display:block}
+
+.drop{border:1.5px dashed var(--line-2);border-radius:var(--r-lg);padding:28px;text-align:center;cursor:pointer;background:#FCFCFA;transition:border-color .15s,background .15s}
+.drop:hover,.drop.over{border-color:var(--ink);background:var(--yellow-soft)}
+.drop svg{width:28px;height:28px;color:var(--ink-2)}
+.drop b{display:block;margin-top:8px;font-size:15px}
+.drop span{font-size:12.5px;color:var(--ink-2)}
+.bar{height:8px;background:var(--ground);border-radius:99px;overflow:hidden;border:1px solid var(--line)}
+.bar>div{height:100%;background:var(--yellow);width:0;transition:width .3s}
+.kv{display:grid;grid-template-columns:repeat(4,1fr);gap:10px}
+@media (max-width:700px){.kv{grid-template-columns:repeat(2,1fr)}}
+.kv>div{border:1px solid var(--line);border-radius:var(--r);padding:10px 12px}
+.kv .k{font-size:12px;color:var(--ink-2);font-weight:600}
+.kv .v{font-size:20px;font-weight:700}
+.msg{border-radius:var(--r);padding:10px 12px;font-size:13px;display:flex;gap:8px;align-items:flex-start}
+.msg.warn{background:var(--yellow-soft);color:var(--yellow-ink)}
+.msg.err{background:#FDECEC;color:var(--err)}
+.msg.ok{background:#EAF5EE;color:var(--ok)}
+.msg.info{background:var(--ground);color:var(--ink-2)}
+.msg svg{margin-top:2px}
+.msg ul{margin:4px 0 0;padding-left:18px}
+.sec-t{font-size:14px;font-weight:700;margin:18px 0 8px}
+.sec-t:first-child{margin-top:0}
+.fgrid{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:14px 16px}
+@media (max-width:800px){.fgrid{grid-template-columns:1fr 1fr}}
+.preset{display:grid;grid-template-columns:repeat(3,1fr);gap:10px}
+@media (max-width:700px){.preset{grid-template-columns:1fr}}
+.preset button{text-align:left;border:1px solid var(--line);border-radius:var(--r);padding:10px 12px;background:var(--paper);cursor:pointer}
+.preset button b{display:block;font-size:13.5px}
+.preset button span{font-size:12px;color:var(--ink-2)}
+.preset button.on{border-color:var(--ink);box-shadow:inset 0 -3px 0 var(--yellow)}
+pre.log{background:#1E2228;color:#E8E6DF;font-size:11.5px;line-height:1.5;padding:12px;border-radius:var(--r);max-height:240px;overflow:auto;white-space:pre-wrap;word-break:break-all;margin:0}
+.chart{border:1px solid var(--line);border-radius:var(--r);padding:10px}
+.legend{display:flex;gap:14px;font-size:12px;color:var(--ink-2);margin-top:6px;flex-wrap:wrap}
+.legend i{display:inline-block;width:14px;height:3px;border-radius:2px;vertical-align:middle;margin-right:5px}
+.models .tbl td{font-size:12.5px}
+.active-row{background:var(--yellow-soft)}
+
+/* library */
+.lib-tools{display:flex;gap:10px;flex-wrap:wrap;align-items:center;padding:12px 20px;border-bottom:1px solid var(--line)}
+.lib-tools .input{width:auto}
+.lib-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(300px,1fr));gap:12px}
+.lib-card{border:1px solid var(--line);border-radius:var(--r);display:flex;flex-direction:column;overflow:hidden;background:var(--paper)}
+.lib-card.cur{border-color:var(--ink);box-shadow:inset 0 3px 0 var(--yellow)}
+.lib-thumb{border:none;padding:0;background:var(--ground);height:150px;cursor:pointer;display:block;width:100%}
+.lib-thumb img{width:100%;height:100%;object-fit:cover;display:block}
+.lib-body{padding:10px 12px;display:flex;flex-direction:column;gap:5px}
+.lib-title{font-weight:700;font-size:14px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.chips{display:flex;gap:5px;flex-wrap:wrap}
+.chip{display:inline-flex;align-items:center;gap:5px;font-size:12px;padding:1px 8px;border-radius:999px;border:1px solid var(--line);color:var(--ink-2)}
+.chip .sw{width:8px;height:8px;border-radius:2px}
+.lib-act{display:flex;align-items:center;gap:4px;margin-top:4px;padding-top:8px;border-top:1px solid #F0EFEA}
+.switch{display:inline-flex;align-items:center;gap:8px;font-size:13px;font-weight:600;cursor:pointer;user-select:none}
+.switch input{position:absolute;opacity:0;width:1px;height:1px}
+.switch .track{width:34px;height:20px;border-radius:99px;background:var(--line-2);position:relative;transition:background .15s;flex-shrink:0}
+.switch .track::after{content:"";position:absolute;top:2px;left:2px;width:16px;height:16px;border-radius:50%;background:#fff;box-shadow:0 1px 2px rgba(0,0,0,.25);transition:transform .15s}
+.switch input:checked+.track{background:var(--yellow-deep)}
+.switch input:checked+.track::after{transform:translateX(14px)}
+.switch input:focus-visible+.track{outline:2px solid var(--ink);outline-offset:2px}
+.lib-status{font-size:12px;color:var(--ink-3)}
+.linkish{border:none;background:none;padding:0;color:var(--ink-2);text-decoration:underline;text-underline-offset:3px;cursor:pointer;font-size:13px}
+.linkish:hover{color:var(--ink)}
+/* what's new */
+.news-ver{padding-bottom:18px;margin-bottom:18px;border-bottom:1px solid var(--line)}
+.news-ver:last-child{border-bottom:none;margin-bottom:0}
+.news-ver h4{margin:0;font-size:17px}
+.news-title{margin:4px 0 10px;color:var(--ink-2)}
+.news-sec{margin-top:10px}
+.news-sec ul{margin:6px 0 0;padding-left:20px}
+.news-sec li{margin:3px 0}
+.news-sec .tbl-wrap{margin-top:8px;border:1px solid var(--line);border-radius:var(--r)}
+code{font-size:12.5px;background:var(--ground);padding:1px 5px;border-radius:4px}
+
+/* toast */
+#toasts{position:fixed;top:16px;right:16px;z-index:1000;display:flex;flex-direction:column;gap:8px;max-width:400px}
+.toast{display:flex;gap:10px;align-items:flex-start;background:var(--ink);color:#fff;padding:11px 14px;border-radius:var(--r);font-size:13px;box-shadow:0 8px 24px rgba(0,0,0,.18);animation:tin .2s ease-out;border-left:4px solid var(--ink-3)}
+.toast.success{border-left-color:#5CC28A}.toast.error{border-left-color:#FF6B6B}.toast.info{border-left-color:var(--yellow)}
+@keyframes tin{from{transform:translateX(20px);opacity:0}}
+</style>
+</head>
+<body>
+<div id="toasts" role="status" aria-live="polite"></div>
+<div class="rule"></div>
+
+<header class="top">
+  <div class="top-in">
+    <div class="brand">
+      <button class="logo-slot" id="logo-slot" title="คลิกเพื่อใส่โลโก้หน่วยงาน (PNG/JPG/SVG)" aria-label="ใส่โลโก้หน่วยงาน">
+        <img id="logo-img" alt="โลโก้หน่วยงาน" class="hidden">
+        <span class="logo-mark" id="logo-mark"><i data-lucide="zap"></i></span>
+      </button>
+      <input type="file" id="logo-input" accept="image/png,image/jpeg,image/svg+xml,image/webp" class="hidden">
+      <div>
+        <h1>ระบบหาปริมาณความเสียหายโครงสร้างจากภาพถ่าย</h1>
+        <p>วัดรอยร้าว พื้นที่ผิวเสียหาย และเหล็กเสริม จากภาพถ่ายหน้างาน พร้อมตัวช่วยตรวจจับด้วย AI</p>
+      </div>
+    </div>
+    <div class="meta">
+      <div class="field"><label for="meta-bldg">อาคาร / โครงการ</label><input class="input" id="meta-bldg" placeholder="ระบุอาคาร"></div>
+      <div class="field"><label for="meta-floor">ชั้น</label><input class="input" id="meta-floor" placeholder="ระบุชั้น"></div>
+      <div class="field"><label for="meta-loc">ตำแหน่ง</label><input class="input" id="meta-loc" placeholder="เช่น เสา C4"></div>
+    </div>
+    <button class="status-chip" id="srv-chip" title="สถานะเซิร์ฟเวอร์ AI"><span class="dot" id="srv-dot"></span><span id="srv-text">กำลังตรวจสอบ AI</span></button>
+  </div>
+</header>
+
+<main class="wrap">
+  <div class="work">
+    <!-- ================= RAIL ================= -->
+    <aside class="rail">
+      <section class="step current" id="step-1">
+        <div class="step-h"><span class="step-n">1</span><h2>ภาพถ่าย</h2></div>
+        <div class="stack">
+          <label class="file-pick" for="imageUpload"><i data-lucide="image-plus"></i><span id="img-name">เลือกภาพถ่ายใหม่</span></label>
+          <input type="file" id="imageUpload" accept="image/*" class="hidden">
+          <div class="grid2">
+            <button class="btn btn-sm" onclick="saveProject()"><i data-lucide="save"></i>บันทึกโปรเจกต์</button>
+            <button class="btn btn-sm" onclick="document.getElementById('projectUpload').click()"><i data-lucide="folder-open"></i>เปิดโปรเจกต์</button>
+          </div>
+          <input type="file" id="projectUpload" accept=".json" class="hidden">
+          <button class="btn btn-sm btn-block" onclick="Library.show()"><i data-lucide="library"></i>คลังงานตรวจสอบ</button>
+          <div class="lib-status" id="lib-status"></div>
+        </div>
+      </section>
+
+      <section class="step" id="step-2">
+        <div class="step-h"><span class="step-n">2</span><h2>ขนาดอ้างอิง</h2></div>
+        <div class="stack">
+          <div class="seg">
+            <button id="tab-planar" class="on" onclick="setRefMode('planar')">ภาพตรง 2 จุด</button>
+            <button id="tab-persp" onclick="setRefMode('perspective')">ภาพเอียง 4 จุด</button>
+          </div>
+          <div id="cfg-planar" class="stack">
+            <div class="field"><label for="ref-len">ความยาวจริงของวัตถุอ้างอิง (cm)</label><input type="number" class="input" id="ref-len" value="10" min="0.1" step="0.1"></div>
+          </div>
+          <div id="cfg-persp" class="stack hidden">
+            <div class="grid2">
+              <div class="field"><label for="ref-w">ด้านกว้าง (cm)</label><input type="number" class="input" id="ref-w" value="21" min="0.1" step="0.1"></div>
+              <div class="field"><label for="ref-h">ด้านยาว (cm)</label><input type="number" class="input" id="ref-h" value="29.7" min="0.1" step="0.1"></div>
+            </div>
+            <div class="hint">ใช้แผ่นสี่เหลี่ยมที่รู้ขนาด เช่น กระดาษ A4 (21 × 29.7 cm) แปะบนผิวเดียวกับรอยร้าว ด้านกว้างคือขอบบนของแผ่นในภาพ</div>
+          </div>
+          <button class="btn btn-dark btn-block" onclick="startCalibration()"><i data-lucide="crosshair"></i>วางจุดอ้างอิง</button>
+          <div class="cal-status" id="cal-status"><i data-lucide="circle-dashed"></i>ยังไม่ได้กำหนดขนาด</div>
+        </div>
+      </section>
+
+      <section class="step" id="step-3">
+        <div class="step-h"><span class="step-n">3</span><h2>วัดด้วยมือ</h2></div>
+        <div class="tools">
+          <button class="tool" id="tool-crack" onclick="selectTool('crack')"><span class="sw" style="background:var(--crack)"></span>รอยร้าว<span class="k">ความยาว</span></button>
+          <button class="tool" id="tool-area" onclick="selectTool('area')"><span class="sw" style="background:var(--area)"></span>พื้นที่เสียหาย<span class="k">พื้นที่</span></button>
+          <button class="tool" id="tool-rebar" onclick="selectTool('rebar')"><span class="sw" style="background:var(--rebar)"></span>เหล็กเสริม<span class="k">ความยาว</span></button>
+        </div>
+      </section>
+
+      <section class="step" id="step-4">
+        <div class="step-h"><span class="step-n">4</span><h2>ตรวจจับด้วย AI</h2><span class="aside" id="ai-model-name"></span></div>
+        <div class="stack">
+          <div class="ai-state" id="ai-state"><span class="spin"></span><div><b>กำลังเชื่อมต่อเซิร์ฟเวอร์ AI</b></div></div>
+          <div class="field">
+            <label for="ai-conf">ความมั่นใจขั้นต่ำ</label>
+            <div class="range-row"><input type="range" id="ai-conf" min="0.05" max="0.9" step="0.05" value="0.25"><output id="ai-conf-out" class="num">0.25</output></div>
+            <div class="hint">ค่าต่ำ เจอมากขึ้นแต่ผิดมากขึ้น ค่าสูง แม่นขึ้นแต่อาจพลาดรอยเล็ก</div>
+          </div>
+          <details class="more">
+            <summary><i data-lucide="chevron-right"></i>ตั้งค่าเพิ่มเติม</summary>
+            <div class="stack" style="margin-top:10px">
+              <div class="field"><label for="ai-tile">ภาพความละเอียดสูง</label>
+                <select class="input" id="ai-tile"><option value="auto">อัตโนมัติ</option><option value="on">แบ่งภาพเป็นช่องย่อยเสมอ</option><option value="off">ส่งทั้งภาพครั้งเดียว</option></select>
+                <div class="hint">การแบ่งช่องช่วยให้เห็นรอยร้าวเส้นเล็กในภาพใหญ่ แต่ใช้เวลานานขึ้น</div></div>
+              <div class="field"><label for="ai-imgsz">ขนาดภาพที่ส่งให้โมเดล (px)</label><input type="number" class="input" id="ai-imgsz" value="0" min="0" step="32"><div class="hint">0 = ใช้ขนาดเดียวกับตอนเทรน</div></div>
+              <div class="field"><label for="api-url">ที่อยู่เซิร์ฟเวอร์ AI</label><input class="input" id="api-url" placeholder="http://127.0.0.1:8765"></div>
+            </div>
+          </details>
+          <button class="btn btn-primary btn-block" id="btn-detect" onclick="runDetect()" disabled><i data-lucide="scan-search"></i>ตรวจจับความเสียหายในภาพนี้</button>
+          <div class="grid2">
+            <button class="btn btn-sm" id="btn-add-ds" onclick="openAddToDataset()" disabled title="ใช้เส้นที่วาดและผลที่ตรวจทานแล้ว เป็นข้อมูลสอนโมเดล"><i data-lucide="folder-plus"></i>เพิ่มเป็นข้อมูลเทรน</button>
+            <button class="btn btn-sm" id="btn-train" onclick="openTrain()" disabled><i data-lucide="brain-circuit"></i>เทรนโมเดล</button>
+          </div>
+        </div>
+      </section>
+    </aside>
+
+    <!-- ================= STAGE ================= -->
+    <section class="stage">
+      <div class="stage-bar">
+        <span class="mode" id="mode-chip"><span class="sw" id="mode-sw"></span><span id="mode-text">รอภาพถ่าย</span></span>
+        <div class="draw-ctl hidden" id="drawing-controls">
+          <span class="kbd">Enter บันทึก, Backspace ลบจุดล่าสุด, Esc ยกเลิก</span>
+          <button class="btn btn-sm" onclick="undoPoint()"><i data-lucide="undo-2"></i>ลบจุดล่าสุด</button>
+          <button class="btn btn-sm" onclick="cancelDrawing()"><i data-lucide="x"></i>ยกเลิก</button>
+          <button class="btn btn-sm btn-primary" onclick="finishDrawing()"><i data-lucide="check"></i>บันทึกเส้นนี้</button>
+        </div>
+        <div class="draw-ctl hidden" id="ai-controls">
+          <button class="btn btn-sm btn-ghost" onclick="toggleAiLayer()" id="btn-ai-layer"><i data-lucide="eye-off"></i><span>ซ่อนผล AI</span></button>
+          <button class="btn btn-sm btn-ghost btn-danger" onclick="clearAi()"><i data-lucide="trash-2"></i>ลบผล AI ทั้งหมด</button>
+        </div>
+      </div>
+      <div class="canvas-box" id="canvas-box">
+        <div class="empty" id="canvas-empty">
+          <i data-lucide="image"></i>
+          <b>เริ่มจากเลือกภาพถ่ายในขั้นที่ 1</b>
+          <span>ถ่ายให้เห็นวัตถุอ้างอิงที่รู้ขนาดจริง อยู่บนผิวเดียวกับความเสียหาย</span>
+        </div>
+        <canvas id="main-canvas" class="hidden c-cross"></canvas>
+        <div class="busy-over hidden" id="canvas-busy"><span class="spin"></span><span id="canvas-busy-text">กำลังตรวจจับ</span></div>
+      </div>
+      <div class="notes">
+        <div class="note"><i data-lucide="info"></i><span id="instruction-text">เลือกภาพ แล้ววางจุดอ้างอิงขนาด จากนั้นวัดด้วยมือหรือให้ AI ตรวจจับ</span></div>
+        <div class="note warn"><i data-lucide="triangle-alert"></i><span>ความเสียหายและวัตถุอ้างอิงต้องอยู่บนระนาบเดียวกัน ถ้าวัดข้ามผิว เช่น ข้ามมุมเสา ค่าที่ได้จะคลาดเคลื่อน</span></div>
+      </div>
+    </section>
+  </div>
+
+  <!-- ================= RESULTS ================= -->
+  <section class="results">
+    <div class="results-h">
+      <h2>สรุปผลการประเมินโครงสร้าง</h2>
+      <div class="act"><button class="btn btn-dark" onclick="exportExcel()"><i data-lucide="file-spreadsheet"></i>ส่งออก Excel</button></div>
+    </div>
+    <div class="res-grid">
+      <div class="stack" style="gap:14px">
+        <div class="totals">
+          <div class="total"><span class="lab"><span class="sw" style="background:var(--crack)"></span>ความยาวรอยร้าวรวม</span><span class="val num" id="total-crack-len">0.00</span><span class="unit">cm</span></div>
+          <div class="total"><span class="lab"><span class="sw" style="background:var(--area)"></span>พื้นที่เสียหายรวม</span><span class="val num" id="total-area">0.00</span><span class="unit">ตร.ซม.</span></div>
+          <div class="total"><span class="lab"><span class="sw" style="background:var(--rebar)"></span>เหล็กเสริมรวม</span><span class="val num" id="total-rebar">0.00</span><span class="unit">cm</span></div>
+        </div>
+        <div class="card">
+          <div class="card-h">ความยาวรอยร้าว แยกตามความกว้าง</div>
+          <table class="tbl"><thead><tr><th>ความกว้าง</th><th class="r">ความยาวรวม (cm)</th></tr></thead>
+            <tbody id="tb-summary-crack"></tbody></table>
+        </div>
+      </div>
+      <div class="tables">
+        <div class="card">
+          <div class="card-h"><span class="sw" style="background:var(--crack)"></span>รอยร้าว<span class="count" id="cnt-crack"></span></div>
+          <div class="tbl-wrap"><table class="tbl"><thead><tr><th>ID</th><th>ที่มา</th><th>กว้าง (mm)</th><th>ลึก (mm)</th><th class="r">ยาว (cm)</th><th class="c">จัดการ</th></tr></thead>
+            <tbody id="tb-raw-crack"></tbody></table></div>
+        </div>
+        <div class="card">
+          <div class="card-h"><span class="sw" style="background:var(--area)"></span>พื้นที่เสียหาย<span class="count" id="cnt-area"></span></div>
+          <div class="tbl-wrap"><table class="tbl"><thead><tr><th>ID</th><th>ที่มา</th><th>รายละเอียด / สาเหตุ</th><th class="r">พื้นที่ (ตร.ซม.)</th><th class="c">จัดการ</th></tr></thead>
+            <tbody id="tb-raw-area"></tbody></table></div>
+        </div>
+        <div class="card">
+          <div class="card-h"><span class="sw" style="background:var(--rebar)"></span>เหล็กเสริม<span class="count" id="cnt-rebar"></span></div>
+          <div class="tbl-wrap"><table class="tbl"><thead><tr><th>ID</th><th>ที่มา</th><th>รายละเอียด</th><th class="r">ยาว (cm)</th><th class="c">จัดการ</th></tr></thead>
+            <tbody id="tb-raw-rebar"></tbody></table></div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <footer><i data-lucide="shield-check"></i>สำหรับใช้ภายใน กองวิศวกรรมบำรุงรักษาโยธา ฝ่ายบำรุงรักษาโยธา<span style="color:var(--line-2)">|</span><button class="linkish" onclick="showWhatsNew()">เวอร์ชัน <span id="app-version"></span> มีอะไรใหม่</button></footer>
+</main>
+
+<!-- ================= DIALOG: record entry ================= -->
+<div class="dlg-bg" id="dlg-record" role="dialog" aria-modal="true" aria-labelledby="rec-title">
+  <div class="dlg">
+    <div class="dlg-h"><h3 id="rec-title">บันทึกข้อมูล</h3></div>
+    <div class="dlg-b stack" id="rec-body"></div>
+    <div class="dlg-f">
+      <button class="btn" id="rec-cancel">ยกเลิก</button>
+      <button class="btn btn-primary" id="rec-ok">บันทึก</button>
+    </div>
+  </div>
+</div>
+
+<!-- ================= DIALOG: confirm ================= -->
+<div class="dlg-bg" id="dlg-confirm" role="dialog" aria-modal="true" aria-labelledby="cf-title">
+  <div class="dlg">
+    <div class="dlg-h"><h3 id="cf-title"></h3></div>
+    <div class="dlg-b" id="cf-body"></div>
+    <div class="dlg-f"><button class="btn" id="cf-no">ยกเลิก</button><button class="btn btn-primary" id="cf-yes">ตกลง</button></div>
+  </div>
+</div>
+
+<!-- ================= DIALOG: add to dataset ================= -->
+<div class="dlg-bg" id="dlg-ds" role="dialog" aria-modal="true">
+  <div class="dlg">
+    <div class="dlg-h"><h3>เพิ่มภาพนี้เป็นข้อมูลเทรน</h3><button class="icon-btn" onclick="closeDlg('dlg-ds')" aria-label="ปิด"><i data-lucide="x"></i></button></div>
+    <div class="dlg-b stack">
+      <div id="ds-summary" class="msg ok"></div>
+      <div class="grid2">
+        <div class="field"><label for="ds-crack-w">ความหนาเส้นรอยร้าว (px)</label><input type="number" class="input" id="ds-crack-w" min="2" max="80"></div>
+        <div class="field"><label for="ds-rebar-w">ความหนาเส้นเหล็กเสริม (px)</label><input type="number" class="input" id="ds-rebar-w" min="2" max="200"></div>
+      </div>
+      <div class="hint">เส้นที่วาดด้วยมือจะถูกขยายเป็นแถบหนาตามค่านี้ (หน่วยพิกเซลของภาพจริง) ให้ใกล้เคียงความกว้างของรอยที่เห็นในภาพ ส่วนผล AI ใช้รูปร่างที่ตรวจจับได้ตามเดิม ควรตรวจทานและลบผล AI ที่ผิดก่อนเพิ่ม</div>
+      <div id="ds-warn" class="msg warn hidden"></div>
+    </div>
+    <div class="dlg-f"><button class="btn" onclick="closeDlg('dlg-ds')">ยกเลิก</button><button class="btn btn-primary" id="ds-ok" onclick="submitAnnotation()"><i data-lucide="folder-plus"></i>เพิ่มเข้าชุดข้อมูล</button></div>
+  </div>
+</div>
+
+<!-- ================= DIALOG: training ================= -->
+<div class="dlg-bg" id="dlg-train" role="dialog" aria-modal="true">
+  <div class="dlg wide">
+    <div class="dlg-h"><i data-lucide="brain-circuit"></i><h3>เทรนโมเดลตรวจจับความเสียหาย</h3><button class="icon-btn" onclick="closeDlg('dlg-train')" aria-label="ปิด"><i data-lucide="x"></i></button></div>
+    <div class="tabs" role="tablist">
+      <button class="on" data-tab="t-data"><span class="n">1</span>ข้อมูลภาพ</button>
+      <button data-tab="t-class"><span class="n">2</span>คลาส</button>
+      <button data-tab="t-cfg"><span class="n">3</span>ตั้งค่าการเทรน</button>
+      <button data-tab="t-prog"><span class="n">4</span>ความคืบหน้าและโมเดล</button>
+    </div>
+    <div class="dlg-b" style="flex:1">
+      <!-- ---- data ---- -->
+      <div class="tab-pane on" id="t-data">
+        <div class="msg info" id="lib-train-card" style="margin-bottom:12px;align-items:center"></div>
+        <div class="drop" id="drop" tabindex="0" role="button">
+          <i data-lucide="upload-cloud"></i>
+          <b>ลากไฟล์มาวาง หรือคลิกเพื่อเลือก</b>
+          <span>ไฟล์ .zip ชุดข้อมูลแบบ YOLO หรือภาพพร้อมไฟล์ป้ายกำกับ .txt ชื่อเดียวกัน เลือกได้หลายไฟล์</span>
+        </div>
+        <input type="file" id="ds-files" multiple class="hidden" accept=".zip,.txt,.yaml,.yml,image/*">
+        <div id="up-progress" class="stack hidden" style="margin-top:12px">
+          <div class="row" style="justify-content:space-between;font-size:12.5px"><span id="up-text">กำลังอัปโหลด</span><span id="up-pct" class="num">0%</span></div>
+          <div class="bar"><div id="up-bar"></div></div>
+        </div>
+        <div id="up-result" style="margin-top:12px"></div>
+
+        <div class="sec-t">ชุดข้อมูลปัจจุบัน</div>
+        <div class="kv">
+          <div><div class="k">ภาพทั้งหมด</div><div class="v num" id="ds-images">0</div></div>
+          <div><div class="k">มีป้ายกำกับ</div><div class="v num" id="ds-labeled">0</div></div>
+          <div><div class="k">ภาพพื้นหลัง (ไม่มีความเสียหาย)</div><div class="v num" id="ds-bg">0</div></div>
+          <div><div class="k">ชนิดป้ายกำกับ</div><div class="v" id="ds-type" style="font-size:15px;padding-top:4px">-</div></div>
+        </div>
+        <div class="card" style="margin-top:12px">
+          <table class="tbl"><thead><tr><th style="width:44px">#</th><th>คลาส</th><th class="r">จำนวนชิ้นที่ติดป้าย</th></tr></thead><tbody id="ds-inst"></tbody></table>
+        </div>
+        <div id="ds-warns" class="stack" style="margin-top:10px"></div>
+        <div class="row" style="margin-top:14px;justify-content:space-between;flex-wrap:wrap;align-items:flex-start">
+          <details class="more"><summary><i data-lucide="chevron-right"></i>รูปแบบไฟล์ที่รองรับ</summary>
+            <div class="hint" style="margin-top:8px;max-width:640px">
+              ป้ายกำกับรูปแบบ YOLO หนึ่งไฟล์ .txt ต่อหนึ่งภาพ แต่ละบรรทัดคือหนึ่งชิ้น เริ่มด้วยหมายเลขคลาส ตามด้วยพิกัดที่หารด้วยขนาดภาพแล้ว (0 ถึง 1)<br>
+              แบบ polygon สำหรับ Segmentation: <code>0 x1 y1 x2 y2 x3 y3 ...</code><br>แบบกรอบสำหรับ Detection: <code>0 xc yc w h</code><br>
+              รองรับไฟล์ zip ที่ส่งออกจาก Roboflow, CVAT หรือ Label Studio ในรูปแบบ YOLO ระบบจะอ่านชื่อคลาสจาก data.yaml ให้อัตโนมัติ
+              หรือวาดเส้นในหน้าหลักแล้วกด "เพิ่มเป็นข้อมูลเทรน" ก็ได้
+            </div></details>
+          <button class="btn btn-sm btn-danger" onclick="clearDataset()"><i data-lucide="trash-2"></i>ล้างชุดข้อมูลทั้งหมด</button>
+        </div>
+      </div>
+
+      <!-- ---- classes ---- -->
+      <div class="tab-pane" id="t-class">
+        <div class="msg info" style="margin-bottom:12px"><i data-lucide="info"></i><span>ลำดับของคลาสคือหมายเลขในไฟล์ป้ายกำกับ (แถวแรกคือ 0) ต้องตรงกับชุดข้อมูลที่ใช้ ส่วนประเภทการวัดบอกระบบว่าผลที่ตรวจเจอจะไปอยู่ในตารางใดและคำนวณอย่างไร</span></div>
+        <div class="card"><div class="tbl-wrap">
+          <table class="tbl"><thead><tr><th style="width:44px">#</th><th>ชื่อคลาสในโมเดล</th><th>ชื่อที่แสดง</th><th>ประเภทการวัด</th><th>สี</th><th class="c">ลำดับ</th><th></th></tr></thead>
+            <tbody id="cls-body"></tbody></table></div></div>
+        <div class="row" style="margin-top:12px;justify-content:space-between">
+          <button class="btn btn-sm" onclick="addClassRow()"><i data-lucide="plus"></i>เพิ่มคลาส</button>
+          <button class="btn btn-sm btn-dark" onclick="saveClasses()"><i data-lucide="save"></i>บันทึกคลาส</button>
+        </div>
+        <div class="hint" style="margin-top:8px">ชื่อคลาสในโมเดลใช้ตัวอักษรอังกฤษ ตัวเลข _ หรือ - เท่านั้น ส่วนชื่อที่แสดงใช้ภาษาไทยได้</div>
+      </div>
+
+      <!-- ---- config ---- -->
+      <div class="tab-pane" id="t-cfg">
+        <div class="sec-t">เลือกระดับการเทรน</div>
+        <div class="preset" id="presets">
+          <button data-p="quick"><b>ทดลองเร็ว</b><span>รุ่น n 50 รอบ ภาพ 640 px เหมาะกับลองระบบ</span></button>
+          <button data-p="standard"><b>มาตรฐาน</b><span>รุ่น s 150 รอบ ภาพ 1024 px ใช้งานทั่วไป</span></button>
+          <button data-p="fine"><b>ละเอียด</b><span>รุ่น m 300 รอบ ภาพ 1280 px รอยร้าวเส้นเล็ก</span></button>
+        </div>
+
+        <div class="sec-t">ค่าหลัก</div>
+        <div class="fgrid">
+          <div class="field"><label for="h-family">ตระกูลโมเดล</label><select class="input" id="h-family"><option value="yolo26">YOLO26 (ใหม่ล่าสุด)</option><option value="yolo11">YOLO11</option></select></div>
+          <div class="field"><label for="h-size">ขนาดโมเดล</label><select class="input" id="h-size"><option value="n">n เล็กสุด เร็วสุด</option><option value="s">s เล็ก</option><option value="m">m กลาง</option><option value="l">l ใหญ่</option><option value="x">x ใหญ่สุด</option></select></div>
+          <div class="field"><label for="h-task">ชนิดงาน</label><select class="input" id="h-task"><option value="segment">Segmentation วัดยาวและพื้นที่ได้</option><option value="detect">Detection กรอบสี่เหลี่ยม</option></select></div>
+          <div class="field"><label for="h-epochs">จำนวนรอบเทรน (epochs)</label><input type="number" class="input" id="h-epochs" min="1" max="2000"><div class="hint">รอบมาก แม่นขึ้นแต่นานขึ้น</div></div>
+          <div class="field"><label for="h-imgsz">ขนาดภาพตอนเทรน (px)</label><select class="input" id="h-imgsz"><option>640</option><option>800</option><option>960</option><option>1024</option><option>1280</option><option>1536</option></select><div class="hint">รอยร้าวเส้นเล็กควรใช้ 1024 ขึ้นไป</div></div>
+          <div class="field"><label for="h-batch">Batch size</label><input type="number" class="input" id="h-batch" min="-1" max="512"><div class="hint">-1 คือให้ระบบเลือกตามหน่วยความจำ GPU</div></div>
+          <div class="field"><label for="h-device">อุปกรณ์ที่ใช้เทรน</label><select class="input" id="h-device"><option value="auto">อัตโนมัติ</option></select></div>
+          <div class="field"><label for="h-val">สัดส่วนภาพสำหรับตรวจสอบ (%)</label><input type="number" class="input" id="h-val" min="5" max="50"><div class="hint">แยกไว้วัดผล ไม่ใช้สอน</div></div>
+          <div class="field"><label for="h-patience">หยุดก่อนถ้าไม่ดีขึ้นภายใน (รอบ)</label><input type="number" class="input" id="h-patience" min="0" max="2000"><div class="hint">0 คือไม่หยุดก่อน</div></div>
+          <div class="field" style="grid-column:1/-1"><label for="h-base">เริ่มจาก</label><select class="input" id="h-base"><option value="">โมเดลตั้งต้นของ Ultralytics (ดาวน์โหลดอัตโนมัติครั้งแรก)</option></select><div class="hint">เลือกโมเดลที่เคยเทรน เพื่อเทรนต่อด้วยข้อมูลใหม่ ใช้ได้เมื่อรายการคลาสเหมือนเดิม</div></div>
+        </div>
+
+        <details class="more" style="margin-top:18px"><summary><i data-lucide="chevron-right"></i>ตั้งค่าขั้นสูงและการสุ่มปรับภาพ (augmentation)</summary>
+          <div class="fgrid" style="margin-top:12px">
+            <div class="field"><label for="h-lr0">Learning rate เริ่มต้น</label><input type="number" class="input" id="h-lr0" step="0.001" min="0.000001" max="0.5"></div>
+            <div class="field"><label for="h-optimizer">Optimizer</label><select class="input" id="h-optimizer"><option value="auto">อัตโนมัติ</option><option>SGD</option><option>AdamW</option><option>Adam</option></select></div>
+            <div class="field"><label for="h-workers">จำนวน worker โหลดข้อมูล</label><input type="number" class="input" id="h-workers" min="0" max="32"></div>
+            <div class="field"><label for="h-cache">เก็บภาพไว้ในหน่วยความจำ</label><select class="input" id="h-cache"><option value="">ไม่เก็บ</option><option value="ram">RAM (เร็วสุด)</option><option value="disk">ดิสก์</option></select></div>
+            <div class="field"><label for="h-seed">Seed</label><input type="number" class="input" id="h-seed" min="0"></div>
+            <div class="field"><label for="h-close_mosaic">ปิด mosaic ในช่วงรอบสุดท้าย</label><input type="number" class="input" id="h-close_mosaic" min="0"></div>
+            <div class="field"><label for="h-fliplr">พลิกซ้าย-ขวา (โอกาส 0-1)</label><input type="number" class="input" id="h-fliplr" min="0" max="1" step="0.05"></div>
+            <div class="field"><label for="h-flipud">พลิกบน-ล่าง (โอกาส 0-1)</label><input type="number" class="input" id="h-flipud" min="0" max="1" step="0.05"></div>
+            <div class="field"><label for="h-degrees">หมุนภาพ (± องศา)</label><input type="number" class="input" id="h-degrees" min="0" max="180"></div>
+            <div class="field"><label for="h-translate">เลื่อนภาพ (สัดส่วน)</label><input type="number" class="input" id="h-translate" min="0" max="0.9" step="0.05"></div>
+            <div class="field"><label for="h-scale">ย่อขยาย (± สัดส่วน)</label><input type="number" class="input" id="h-scale" min="0" max="0.95" step="0.05"></div>
+            <div class="field"><label for="h-mosaic">Mosaic (โอกาส 0-1)</label><input type="number" class="input" id="h-mosaic" min="0" max="1" step="0.1"></div>
+            <div class="field"><label for="h-hsv_h">สุ่มเฉดสี</label><input type="number" class="input" id="h-hsv_h" min="0" max="1" step="0.005"></div>
+            <div class="field"><label for="h-hsv_s">สุ่มความอิ่มสี</label><input type="number" class="input" id="h-hsv_s" min="0" max="1" step="0.05"></div>
+            <div class="field"><label for="h-hsv_v">สุ่มความสว่าง</label><input type="number" class="input" id="h-hsv_v" min="0" max="1" step="0.05"></div>
+            <div class="field"><label class="row" style="gap:8px"><input type="checkbox" id="h-amp">Mixed precision (AMP)</label><div class="hint">เร็วขึ้นและใช้หน่วยความจำน้อยลงบน GPU</div></div>
+            <div class="field"><label class="row" style="gap:8px"><input type="checkbox" id="h-cos_lr">Cosine LR schedule</label></div>
+            <div class="field"><label class="row" style="gap:8px"><input type="checkbox" id="h-plots">บันทึกกราฟและภาพตัวอย่าง</label></div>
+          </div>
+          <div class="row" style="margin-top:10px"><button class="btn btn-sm" onclick="resetHyp()"><i data-lucide="rotate-ccw"></i>คืนค่าเริ่มต้น</button></div>
+        </details>
+        <div id="cfg-check" class="stack" style="margin-top:16px"></div>
+      </div>
+
+      <!-- ---- progress ---- -->
+      <div class="tab-pane" id="t-prog">
+        <div class="row" style="justify-content:space-between;flex-wrap:wrap;gap:10px">
+          <div><div style="font-weight:700;font-size:15px" id="p-state">ยังไม่มีการเทรน</div><div class="hint" id="p-sub"></div></div>
+          <button class="btn btn-sm btn-danger" id="p-stop" onclick="stopTrain()" disabled><i data-lucide="square"></i>หยุดเทรน</button>
+        </div>
+        <div class="bar" style="margin:12px 0"><div id="p-bar"></div></div>
+        <div class="kv">
+          <div><div class="k">รอบ</div><div class="v num" id="p-epoch">-</div></div>
+          <div><div class="k">mAP50 ยิ่งสูงยิ่งดี</div><div class="v num" id="p-map50">-</div></div>
+          <div><div class="k">Precision / Recall</div><div class="v num" id="p-pr" style="font-size:16px;padding-top:4px">-</div></div>
+          <div><div class="k">เวลาที่เหลือโดยประมาณ</div><div class="v num" id="p-eta" style="font-size:16px;padding-top:4px">-</div></div>
+        </div>
+        <div class="chart" style="margin-top:12px">
+          <div style="position:relative"><svg id="p-chart" viewBox="0 0 600 160" preserveAspectRatio="none" style="width:100%;height:160px;display:block" aria-label="กราฟผลการเทรน"></svg><div id="p-chart-empty" class="hint" style="position:absolute;inset:0;display:grid;place-items:center;margin:0">กราฟจะแสดงเมื่อเทรนครบรอบแรก</div></div>
+          <div class="legend"><span><i style="background:var(--yellow-deep)"></i>mAP50</span><span><i style="background:var(--ink)"></i>mAP50-95</span><span><i style="background:var(--crack);opacity:.6"></i>loss ชุดตรวจสอบ (ปรับสเกล)</span></div>
+        </div>
+        <div id="p-msg" style="margin-top:12px"></div>
+        <details class="more" style="margin-top:12px"><summary><i data-lucide="chevron-right"></i>บันทึกการทำงาน (log)</summary><pre class="log" id="p-log" style="margin-top:8px"></pre></details>
+
+        <div class="sec-t">โมเดลที่มีอยู่</div>
+        <div class="card models"><div class="tbl-wrap"><table class="tbl"><thead><tr><th>รอบการเทรน</th><th>รุ่น</th><th>สถานะ</th><th class="r">mAP50</th><th>คลาส</th><th class="c"></th></tr></thead><tbody id="m-body"></tbody></table></div></div>
+        <div class="row" style="margin-top:10px;gap:8px;flex-wrap:wrap">
+          <button class="btn btn-sm" onclick="document.getElementById('pt-input').click()"><i data-lucide="upload"></i>นำเข้าไฟล์โมเดล .pt</button>
+          <input type="file" id="pt-input" accept=".pt" class="hidden">
+          <span class="hint">ไฟล์ best.pt ที่เทรนจากเครื่องอื่นด้วย Ultralytics</span>
+        </div>
+      </div>
+    </div>
+    <div class="dlg-f">
+      <span class="hint" id="train-foot" style="margin-right:auto;align-self:center"></span>
+      <button class="btn" onclick="closeDlg('dlg-train')">ปิด</button>
+      <button class="btn btn-primary" id="btn-start-train" onclick="startTrain()"><i data-lucide="play"></i>เริ่มเทรน</button>
+    </div>
+  </div>
+</div>
+
+<!-- ================= DIALOG: library ================= -->
+<div class="dlg-bg" id="dlg-lib" role="dialog" aria-modal="true" aria-labelledby="lib-h">
+  <div class="dlg wide">
+    <div class="dlg-h"><i data-lucide="library"></i><h3 id="lib-h">คลังงานตรวจสอบ</h3><button class="icon-btn" onclick="closeDlg('dlg-lib')" aria-label="ปิด"><i data-lucide="x"></i></button></div>
+    <div class="lib-tools">
+      <input class="input" id="lib-search" placeholder="ค้นหาอาคาร ชั้น ตำแหน่ง หรือชื่อไฟล์" style="flex:1 1 240px" aria-label="ค้นหาในคลัง">
+      <select class="input" id="lib-filter" aria-label="ตัวกรอง"><option value="all">ทั้งหมด</option><option value="on">ใช้เทรน</option><option value="off">ไม่ใช้เทรน</option></select>
+      <label class="switch"><input type="checkbox" id="lib-auto"><span class="track"></span>บันทึกเข้าคลังอัตโนมัติ</label>
+    </div>
+    <div class="lib-tools" style="font-size:12.5px;color:var(--ink-2)">
+      <i data-lucide="hard-drive"></i><span id="lib-info" style="flex:1"></span>
+      <span class="hint" id="lib-backup-hint" style="margin:0"></span>
+      <button class="btn btn-sm" onclick="Library.backup()"><i data-lucide="archive"></i>สำรองคลัง</button>
+      <button class="btn btn-sm" onclick="document.getElementById('lib-restore-input').click()"><i data-lucide="archive-restore"></i>กู้คืน</button>
+      <input type="file" id="lib-restore-input" accept=".zip" class="hidden">
+    </div>
+    <div class="dlg-b" style="flex:1;background:var(--ground)">
+      <div class="msg info" style="margin-bottom:12px"><i data-lucide="info"></i><span>คลังเก็บอยู่ในเบราว์เซอร์ของเครื่องนี้เท่านั้น ไม่ถูกส่งขึ้นอินเทอร์เน็ต ถ้าล้างข้อมูลเบราว์เซอร์หรือเปลี่ยนเครื่องจะหายไป จึงควรกด "สำรองคลัง" เป็นระยะ</span></div>
+      <div class="lib-grid" id="lib-grid"></div>
+    </div>
+    <div class="dlg-f">
+      <span class="hint" id="lib-foot" style="margin-right:auto;align-self:center"></span>
+      <button class="btn" id="lib-export" onclick="Library.exportYolo()"><i data-lucide="file-archive"></i>ดาวน์โหลดชุดข้อมูล YOLO</button>
+      <button class="btn btn-primary" id="lib-sync" onclick="Library.syncServer()"><i data-lucide="send"></i>ส่งเข้าชุดเทรนบนเซิร์ฟเวอร์</button>
+    </div>
+  </div>
+</div>
+
+<!-- ================= DIALOG: what's new ================= -->
+<div class="dlg-bg" id="dlg-news" role="dialog" aria-modal="true" aria-labelledby="news-h">
+  <div class="dlg" style="max-width:760px">
+    <div class="dlg-h"><i data-lucide="sparkles"></i><h3 id="news-h">มีอะไรใหม่</h3><button class="icon-btn" onclick="closeDlg('dlg-news')" aria-label="ปิด"><i data-lucide="x"></i></button></div>
+    <div class="dlg-b" id="news-body"></div>
+    <div class="dlg-f"><button class="btn btn-primary" onclick="closeDlg('dlg-news')">เข้าใจแล้ว</button></div>
+  </div>
+</div>
+
+<script src="changelog.js"></script>
+<script src="app.js"></script>
+<script src="library.js"></script>
+</body>
+</html>
